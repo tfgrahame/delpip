@@ -12,4 +12,4 @@ Deleting PIPs entities concurrently
 `pip install aiohttp`
 
 ### Run
-./delpip.py
+./delpip.py contributors
