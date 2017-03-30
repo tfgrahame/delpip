@@ -54,28 +54,37 @@ async def fetch_pip(session, pid):
     async with session.get(url, proxy=os.environ.get('http_proxy')) as response:
         return await response.json()
 
-async def check_nitro(pid, session):
-    print("checking Nitro with {0}".format(pid))
+async def pip_in_nitro(pid, session):
+    print("seeing if {0} is still in Nitro ...".format(pid))
+    await asyncio.sleep(10)
     url = os.environ.get('NITRO_BASE') + entity_map[entity_type] + '?pid=' + pid + '&api_key=' +  os.environ.get('NITRO_KEY')
     async with session.get(url, proxy=os.environ.get('http_proxy')) as response:
-        return response.status
+        if response.status == 200:
+            return True
+        else:
+            return False
 
-async def process_pip(db_conn, lock, session):
-    print("Processing pip ...")
+async def process_pip(db_conn, lock, session, loop):
+    print("processing pip ...")
     await lock.acquire()
     pid = mark_processing(db_conn)
     lock.release()
+    if pid == None:
+        loop.stop()
     response = await fetch_pip(session, pid)
     print(response[1]['pid'])
-    checkresult = await check_nitro(pid, session)
-    print(checkresult)
+    pip_exists = True
+    while pip_exists:
+        pip_exists = await pip_in_nitro(pid, session)
+    mark_deleted(db_conn, pid)
+    loop.create_task(process_pip(db_conn, lock, session))
 
 def main():
     db_conn = sqlite3.connect('db')
     with aiohttp.ClientSession(connector=conn) as session:
         lock = asyncio.Lock()
         loop = asyncio.get_event_loop()
-        tasks = [loop.create_task(process_pip(db_conn, lock, session)) for task in range(max_tasks)]
+        tasks = [loop.create_task(process_pip(db_conn, lock, session, loop)) for task in range(max_tasks)]
         loop.run_until_complete(asyncio.wait(tasks))
     db_conn.close()
 
