@@ -17,7 +17,7 @@ ssl_context.load_cert_chain(os.environ.get('CERT'))
 conn = aiohttp.TCPConnector(ssl_context=ssl_context)
 max_tasks = 2
 
-async def read_pid(db_conn):
+def read_pid(db_conn):
     c = db_conn.cursor()
     pid = [row[0] for row in c.execute("SELECT pid FROM contributors WHERE processing = '0' AND deleted = '0' LIMIT 1")]
     if pid[0]:
@@ -26,9 +26,9 @@ async def read_pid(db_conn):
     else:
         return None
 
-async def mark_processing(db_conn):
+def mark_processing(db_conn):
     c = db_conn.cursor()
-    pid = await read_pid(db_conn)
+    pid = read_pid(db_conn)
     if pid != None:
         p = (pid,)
         c.execute("UPDATE contributors SET processing = '1' WHERE pid = ?", p)
@@ -44,7 +44,7 @@ def mark_deleted(db_conn, pid):
     c.execute("UPDATE contributors SET deleted = '1' WHERE pid = ?", p)
     db_conn.commit()
 
-async def delete_pip(session, pid):
+def delete_pip(session, pid):
     pass
 
 async def fetch_pip(session, pid):
@@ -63,7 +63,7 @@ async def check_nitro(pid, session):
 async def process_pip(db_conn, lock, session):
     print("Processing pip ...")
     await lock.acquire()
-    pid = await mark_processing(db_conn)
+    pid = mark_processing(db_conn)
     lock.release()
     response = await fetch_pip(session, pid)
     print(response[1]['pid'])
