@@ -10,12 +10,10 @@ import sys
 entity_type = sys.argv[1]
 entity_map = {'contributor': 'people'}
 
-nitro_url = os.environ.get('NITRO_BASE') + entity_map[entity_type]
-
 ssl_context = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
 ssl_context.load_cert_chain(os.environ.get('CERT'))
 conn = aiohttp.TCPConnector(ssl_context=ssl_context)
-max_tasks = 2
+max_workers = 1
 
 def read_pid(db_conn):
     c = db_conn.cursor()
@@ -44,48 +42,59 @@ def mark_deleted(db_conn, pid):
     c.execute("UPDATE contributors SET deleted = '1' WHERE pid = ?", p)
     db_conn.commit()
 
-def delete_pip(session, pid):
-    pass
-
-async def fetch_pip(session, pid):
-    print("fetching pid {0}".format(pid))
-    url = os.environ.get('PIPS_BASE') + entity_type + '/pid.' + pid + '?format=json'
+async def delete_pip(session, pid):
+    print("deleting pid {0}".format(pid))
+    url = os.environ.get('PIPS_BASE') + entity_type + '/pid.' + pid
     print(url)
-    async with session.get(url, proxy=os.environ.get('http_proxy')) as response:
-        return await response.json()
+    async with session.delete(url, proxy=os.environ.get('http_proxy')) as response:
+        return response.status
 
 async def pip_in_nitro(pid, session):
+    await asyncio.sleep(60)
     print("seeing if {0} is still in Nitro ...".format(pid))
-    await asyncio.sleep(10)
+    headers = {"Accept": "application/json"}
     url = os.environ.get('NITRO_BASE') + entity_map[entity_type] + '?pid=' + pid + '&api_key=' +  os.environ.get('NITRO_KEY')
-    async with session.get(url, proxy=os.environ.get('http_proxy')) as response:
-        if response.status == 200:
+    async with session.get(url, proxy=os.environ.get('http_proxy'), headers=headers) as response:
+        data = await response.json()
+        if data['nitro']['results']['total'] != 0:
             return True
         else:
             return False
 
-async def process_pip(db_conn, lock, session, loop):
-    print("processing pip ...")
-    await lock.acquire()
-    pid = mark_processing(db_conn)
-    lock.release()
-    if pid == None:
-        loop.stop()
-    response = await fetch_pip(session, pid)
-    print(response[1]['pid'])
-    pip_exists = True
-    while pip_exists:
-        pip_exists = await pip_in_nitro(pid, session)
-    mark_deleted(db_conn, pid)
-    loop.create_task(process_pip(db_conn, lock, session))
+async def reader(db_conn, q):
+    while True:
+        pid = mark_processing(db_conn)
+        if pid != None:
+            print("putting {0}".format(pid))
+            await q.put(pid)
+        else:
+            for i in range(max_workers):
+                q.put(None)
+
+async def worker(db_conn, session, q):
+    print("worker started ... ")
+    while True:
+        item = await q.get()
+        print("got {0}".format(item))
+        if item == None:
+            q.task_done()
+            break
+        else:
+            delete_status = await delete_pip(session, item)
+            pip_exists = True
+            while pip_exists:
+                pip_exists = await pip_in_nitro(item, session)
+            q.task_done()
+        mark_deleted(db_conn, item)
 
 def main():
     db_conn = sqlite3.connect('db')
     with aiohttp.ClientSession(connector=conn) as session:
-        lock = asyncio.Lock()
+        q = asyncio.Queue(maxsize = 2)
         loop = asyncio.get_event_loop()
-        tasks = [loop.create_task(process_pip(db_conn, lock, session, loop)) for task in range(max_tasks)]
-        loop.run_until_complete(asyncio.wait(tasks))
+        reader_task = loop.create_task(reader(db_conn, q))
+        worker_tasks = [loop.create_task(worker(db_conn, session, q)) for i in range(max_workers)]
+        loop.run_until_complete(asyncio.wait([reader_task] + worker_tasks))
     db_conn.close()
 
 if __name__ == "__main__":
