@@ -13,13 +13,12 @@ entity_map = {'contributor': 'people'}
 ssl_context = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
 ssl_context.load_cert_chain(os.environ.get('CERT'))
 conn = aiohttp.TCPConnector(ssl_context=ssl_context)
-max_workers = 1
+max_workers = 4
 
 def read_pid(db_conn):
     c = db_conn.cursor()
     pid = [row[0] for row in c.execute("SELECT pid FROM contributors WHERE processing = '0' AND deleted = '0' LIMIT 1")]
-    if pid[0]:
-        print("{0} pid found".format(pid[0]))
+    if len(pid) != 0:
         return pid[0]
     else:
         return None
@@ -31,7 +30,6 @@ def mark_processing(db_conn):
         p = (pid,)
         c.execute("UPDATE contributors SET processing = '1' WHERE pid = ?", p)
         db_conn.commit()
-        print("{0} marked for processing".format(pid))
         return pid
     else:
         return None
@@ -50,8 +48,8 @@ async def delete_pip(session, pid):
         return response.status
 
 async def pip_in_nitro(pid, session):
-    await asyncio.sleep(60)
     print("seeing if {0} is still in Nitro ...".format(pid))
+    await asyncio.sleep(60)
     headers = {"Accept": "application/json"}
     url = os.environ.get('NITRO_BASE') + entity_map[entity_type] + '?pid=' + pid + '&api_key=' +  os.environ.get('NITRO_KEY')
     async with session.get(url, proxy=os.environ.get('http_proxy'), headers=headers) as response:
@@ -69,7 +67,8 @@ async def reader(db_conn, q):
             await q.put(pid)
         else:
             for i in range(max_workers):
-                q.put(None)
+                await q.put(None)
+            q.task_done()
 
 async def worker(db_conn, session, q):
     print("worker started ... ")
@@ -94,7 +93,7 @@ def main():
         loop = asyncio.get_event_loop()
         reader_task = loop.create_task(reader(db_conn, q))
         worker_tasks = [loop.create_task(worker(db_conn, session, q)) for i in range(max_workers)]
-        loop.run_until_complete(asyncio.wait([reader_task] + worker_tasks))
+        loop.run_until_complete(asyncio.wait(worker_tasks + [reader_task]))
     db_conn.close()
 
 if __name__ == "__main__":
