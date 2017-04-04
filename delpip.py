@@ -13,7 +13,7 @@ entity_map = {'contributor': 'people'}
 ssl_context = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
 ssl_context.load_cert_chain(os.environ.get('CERT'))
 conn = aiohttp.TCPConnector(ssl_context=ssl_context)
-max_workers = 4
+max_workers = 5
 
 def read_pid(db_conn):
     c = db_conn.cursor()
@@ -49,7 +49,7 @@ async def delete_pip(session, pid):
 
 async def pip_in_nitro(pid, session):
     print("seeing if {0} is still in Nitro ...".format(pid))
-    await asyncio.sleep(60)
+    await asyncio.sleep(30)
     headers = {"Accept": "application/json"}
     url = os.environ.get('NITRO_BASE') + entity_map[entity_type] + '?pid=' + pid + '&api_key=' +  os.environ.get('NITRO_KEY')
     async with session.get(url, proxy=os.environ.get('http_proxy'), headers=headers) as response:
@@ -68,7 +68,7 @@ async def reader(db_conn, q):
         else:
             for i in range(max_workers):
                 await q.put(None)
-            q.task_done()
+            break
 
 async def worker(db_conn, session, q):
     print("worker started ... ")
