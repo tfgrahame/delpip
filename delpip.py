@@ -13,7 +13,7 @@ entity_map = {'contributor': 'people'}
 ssl_context = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
 ssl_context.load_cert_chain(os.environ.get('CERT'))
 conn = aiohttp.TCPConnector(ssl_context=ssl_context)
-max_workers = 5
+max_workers = 100
 
 def read_pid(db_conn):
     c = db_conn.cursor()
@@ -43,13 +43,12 @@ def mark_deleted(db_conn, pid):
 async def delete_pip(session, pid):
     print("deleting pid {0}".format(pid))
     url = os.environ.get('PIPS_BASE') + entity_type + '/pid.' + pid
-    print(url)
     async with session.delete(url, proxy=os.environ.get('http_proxy')) as response:
         return response.status
 
 async def pip_in_nitro(pid, session):
     print("seeing if {0} is still in Nitro ...".format(pid))
-    await asyncio.sleep(30)
+    await asyncio.sleep(120)
     headers = {"Accept": "application/json"}
     url = os.environ.get('NITRO_BASE') + entity_map[entity_type] + '?pid=' + pid + '&api_key=' +  os.environ.get('NITRO_KEY')
     async with session.get(url, proxy=os.environ.get('http_proxy'), headers=headers) as response:
@@ -70,8 +69,9 @@ async def reader(db_conn, q):
                 await q.put(None)
             break
 
-async def worker(db_conn, session, q):
-    print("worker started ... ")
+async def worker(db_conn, session, q, i):
+    await asyncio.sleep(i + 2)
+    print("worker number {0} started ... ".format(i + 1))
     while True:
         item = await q.get()
         print("got {0}".format(item))
@@ -89,10 +89,10 @@ async def worker(db_conn, session, q):
 def main():
     db_conn = sqlite3.connect('db')
     with aiohttp.ClientSession(connector=conn) as session:
-        q = asyncio.Queue(maxsize = 2)
+        q = asyncio.Queue(maxsize = max_workers)
         loop = asyncio.get_event_loop()
         reader_task = loop.create_task(reader(db_conn, q))
-        worker_tasks = [loop.create_task(worker(db_conn, session, q)) for i in range(max_workers)]
+        worker_tasks = [loop.create_task(worker(db_conn, session, q, i)) for i in range(max_workers)]
         loop.run_until_complete(asyncio.wait(worker_tasks + [reader_task]))
     db_conn.close()
 
