@@ -13,3 +13,9 @@ Deleting PIPs entities concurrently
 
 ### Run
 ./delpip.py contributors
+
+### sqlite3
+.schema contributors
+.mode csv
+.load contributors.csv
+

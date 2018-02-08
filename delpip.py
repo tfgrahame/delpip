@@ -13,7 +13,7 @@ entity_map = {'contributor': 'people'}
 ssl_context = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
 ssl_context.load_cert_chain(os.environ.get('CERT'))
 conn = aiohttp.TCPConnector(ssl_context=ssl_context)
-max_workers = 100
+max_workers = 11
 
 def read_pid(db_conn):
     c = db_conn.cursor()
